@@ -58,6 +58,7 @@ Devin's API uses `Bearer` token auth on every endpoint (`apk_user_*` for legacy 
 | `PATCH /admin/keys/:id`       | Toggle `is_active`. Requires `ADMIN_API_KEY`.                                                     |
 | `DELETE /admin/keys/:id`      | Permanently delete a key. Requires `ADMIN_API_KEY`.                                               |
 | `GET /admin/usage`            | Paginated, filtered read over `api_usage_logs`. Requires `ADMIN_API_KEY`. See below.              |
+| `GET /dashboard/*`            | Operator UI (React + Vite static bundle). Login with `ADMIN_API_KEY`. See [Dashboard](#dashboard). |
 
 > All `/v1/*`, `/v2/*`, `/v3/*` requests require `Authorization: Bearer sk-devin-...`. All `/admin/*` requests require `Authorization: Bearer ${ADMIN_API_KEY}`.
 
@@ -80,6 +81,11 @@ pnpm run dev          # development (tsx watch)
 # or
 pnpm run build && pnpm run start    # production
 ```
+
+`pnpm run build` compiles both the server bundle (`dist/index.mjs`) and the dashboard
+static assets (`dashboard/dist/`). The server then mounts the dashboard at
+`/dashboard/*` automatically — visit <http://127.0.0.1:8080/dashboard/> and log in
+with your `ADMIN_API_KEY`.
 
 ## Usage
 
@@ -288,6 +294,39 @@ v0.2 introduces mandatory at-rest encryption for upstream Devin tokens. To upgra
 
 4. **Treat `ENCRYPTION_KEY` like a database password**: losing it permanently locks every existing `upstream_token` row. If the key changes, the proxy will fail to start with `ENCRYPTION_KEY does not decrypt existing upstream_token rows` rather than silently 500-ing every request.
 
+## Dashboard
+
+The gateway ships an optional operator UI that consumes the existing `/admin/keys` and
+`/admin/usage` endpoints. It is a static React + Vite + Tailwind bundle that the
+Express app serves at `/dashboard/*` — there is no separate Node process. The same
+`ADMIN_API_KEY` you use for `/admin/*` REST calls is used to sign in; the token lives
+in `sessionStorage` only for the lifetime of the browser tab.
+
+What the dashboard covers (v0.2):
+
+- **Login** — paste your `ADMIN_API_KEY`, validated against `GET /admin/keys`.
+- **Proxy Keys** — list / create / enable-disable / delete; plaintext key is shown
+  exactly once after creation, with a copy button.
+- **Usage Logs** — paginated table over `/admin/usage` with filters for
+  `client_key` (including the `<missing>` / `<invalid>` sentinels) and `status`.
+
+Build & dev:
+
+```bash
+pnpm run build                # builds server + dashboard
+pnpm run build:dashboard      # dashboard only → dashboard/dist/
+pnpm run dev:dashboard        # standalone Vite dev server at :5173,
+                              # proxies /admin and /v* to the gateway at :8080
+```
+
+When the dashboard bundle is missing (e.g. you cloned but didn't build it),
+`GET /dashboard/*` returns a 503 JSON envelope explaining how to build it; the rest
+of the gateway (`/health`, `/admin/*`, `/v*`) is unaffected.
+
+The dashboard is intentionally a static client — it makes the same authenticated
+fetch calls a script would. You can keep using the REST API + CLI exclusively and
+ignore the dashboard if you prefer.
+
 ## Project layout
 
 ```
@@ -309,12 +348,22 @@ v0.2 introduces mandatory at-rest encryption for upstream Devin tokens. To upgra
 │   │   └── adminAuth.ts              # validate ADMIN_API_KEY
 │   └── routes/
 │       ├── health.ts                 # GET /health
-│       ├── admin.ts                  # /admin/keys CRUD
+│       ├── admin.ts                  # /admin/keys CRUD + /admin/usage
+│       ├── dashboard.ts              # mount dashboard/dist/ at /dashboard/* (SPA)
 │       └── devin.ts                  # /v1/*, /v2/*, /v3/* passthrough
+├── dashboard/                        # React + Vite operator UI (v0.2)
+│   ├── src/
+│   │   ├── main.tsx                  # QueryClient + Router
+│   │   ├── App.tsx                   # login gate + routes
+│   │   ├── components/               # ui/* (button, badge, input, dialog), layout
+│   │   ├── pages/                    # login, keys, usage, not-found
+│   │   └── lib/                      # api, auth, format
+│   ├── vite.config.ts                # base=/dashboard/, proxy /admin to :8080
+│   └── package.json                  # isolated sub-package
 ├── scripts/
 │   ├── create-key.ts                 # CLI: provision a proxy key
 │   └── list-keys.ts                  # CLI: list proxy keys
-├── build.mjs                         # esbuild production bundle
+├── build.mjs                         # esbuild production bundle (server)
 ├── tsconfig.json
 └── package.json
 ```
@@ -329,8 +378,8 @@ This project is modelled after [`jiankong123/ai-proxy-gateway`](https://github.c
 | Style              | OpenAI-compatible chat-completions translation layer       | Bare passthrough (Devin's API is not chat-completions) |
 | Key model          | Single shared upstream credentials (Replit Integrations)   | Per-key upstream Devin token (multi-tenant)           |
 | Storage            | PostgreSQL + Drizzle ORM                                  | SQLite + better-sqlite3                               |
-| Layout             | pnpm monorepo with separate dashboard package             | Single Node package                                   |
-| Dashboard          | React + Vite admin UI                                     | REST API + CLI only (UI planned for v0.3)             |
+| Layout             | pnpm monorepo with separate dashboard package             | Single Node package + `dashboard/` sub-package        |
+| Dashboard          | React + Vite admin UI                                     | React + Vite + Tailwind operator UI at `/dashboard/*` |
 
 ## License
 

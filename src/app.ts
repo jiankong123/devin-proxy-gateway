@@ -7,6 +7,7 @@ import { adminAuth } from "./middlewares/adminAuth.js";
 import healthRouter from "./routes/health.js";
 import adminRouter from "./routes/admin.js";
 import devinRouter from "./routes/devin.js";
+import { dashboardRouter } from "./routes/dashboard.js";
 
 const app: Express = express();
 
@@ -50,6 +51,12 @@ app.use(healthRouter);
 // does NOT consume the admin request stream. Auth is applied first so we
 // don't even parse bodies for unauthenticated callers.
 app.use("/admin", adminAuth, express.json({ limit: "1mb" }), adminRouter);
+
+// ── Operator dashboard (static React SPA) ────────────────────────────────
+// Mounted BEFORE the devin passthrough so the rawBody middleware does NOT
+// run for the static files. The dashboard's own JS authenticates against
+// /admin/* using a bearer token entered on the login page.
+app.use(dashboardRouter());
 
 // ── Devin bare-passthrough router ─────────────────────────────────────────
 // Captures the raw body (including multipart file uploads and SSE payloads)

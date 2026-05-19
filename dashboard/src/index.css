@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+/* The whole console is dark-mode only — matches the ai-proxy-gateway aesthetic. */
+@theme {
+  --color-bg-base: #0d1117;
+  --color-bg-panel: #111827;
+  --color-border-subtle: #1e2d3d;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+/* Tabular numerals everywhere a table renders metrics. */
+table {
+  font-variant-numeric: tabular-nums;
+}
