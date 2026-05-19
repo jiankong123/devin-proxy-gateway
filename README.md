@@ -57,6 +57,7 @@ Devin's API uses `Bearer` token auth on every endpoint (`apk_user_*` for legacy 
 | `GET /admin/keys/:id`         | Get a single key by id. Requires `ADMIN_API_KEY`.                                                 |
 | `PATCH /admin/keys/:id`       | Toggle `is_active`. Requires `ADMIN_API_KEY`.                                                     |
 | `DELETE /admin/keys/:id`      | Permanently delete a key. Requires `ADMIN_API_KEY`.                                               |
+| `GET /admin/usage`            | Paginated, filtered read over `api_usage_logs`. Requires `ADMIN_API_KEY`. See below.              |
 
 > All `/v1/*`, `/v2/*`, `/v3/*` requests require `Authorization: Bearer sk-devin-...`. All `/admin/*` requests require `Authorization: Bearer ${ADMIN_API_KEY}`.
 
@@ -154,6 +155,64 @@ curl https://your-gateway.example.com/v3/organizations/$ORG_ID/sessions/$SESSION
 ```
 
 The gateway adds **no transformation**: the request body, headers (except `Authorization`), and query string go upstream untouched, and the upstream's status code, response headers, and streaming body come back untouched.
+
+### Inspecting usage logs
+
+`GET /admin/usage` returns a paginated, filterable view of `api_usage_logs` so operators can audit traffic without dropping to `sqlite3`. Rejected-auth rows (sentinel `client_key` values `<missing>` / `<invalid>`) are included.
+
+```bash
+# Latest 50 rows across every client
+curl -H "Authorization: Bearer $ADMIN_API_KEY" \
+  https://your-gateway.example.com/admin/usage
+
+# All requests from a single tenant, paginated 25 at a time
+curl -H "Authorization: Bearer $ADMIN_API_KEY" \
+  "https://your-gateway.example.com/admin/usage?client_key=team-a&limit=25&offset=0"
+
+# Every authentication rejection in the last hour
+curl -H "Authorization: Bearer $ADMIN_API_KEY" -G \
+  --data-urlencode "client_key=<missing>" \
+  --data-urlencode "since=$(date -u -d '1 hour ago' '+%Y-%m-%d %H:%M:%S')" \
+  https://your-gateway.example.com/admin/usage
+```
+
+Query parameters:
+
+| Param        | Type   | Default | Notes                                                                                                  |
+| ------------ | ------ | ------- | ------------------------------------------------------------------------------------------------------ |
+| `limit`      | int    | `50`    | Max page size. Hard cap of `200`; larger values are clamped (not rejected).                            |
+| `offset`     | int    | `0`     | Standard offset pagination.                                                                            |
+| `client_key` | string | —       | Exact match. Use `<missing>` or `<invalid>` to inspect rejected requests.                              |
+| `status`     | int    | —       | Exact HTTP status (e.g. `401`, `403`, `200`).                                                          |
+| `since`      | string | —       | Lower bound on `created_at` (inclusive). SQLite-friendly ISO string, e.g. `2026-05-19 14:00:00`.       |
+| `until`      | string | —       | Upper bound on `created_at` (inclusive).                                                               |
+
+Response shape:
+
+```json
+{
+  "items": [
+    {
+      "id": 11,
+      "created_at": "2026-05-19 15:46:01",
+      "client_key": "team-a",
+      "method": "GET",
+      "request_path": "v3/anything",
+      "status": 404,
+      "latency_ms": 23,
+      "is_stream": false,
+      "request_bytes": null,
+      "response_bytes": 22,
+      "error_message": null
+    }
+  ],
+  "total": 137,
+  "limit": 25,
+  "offset": 0
+}
+```
+
+`total` reflects the count **after** filters but **before** `limit`/`offset`, so a UI can render "showing M of N matching".
 
 ## Environment variables
 
