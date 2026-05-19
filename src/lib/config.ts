@@ -22,6 +22,14 @@ export interface Config {
   port: number;
   databasePath: string;
   adminApiKey: string;
+  /**
+   * AES-256-GCM master key for at-rest encryption of upstream Devin tokens.
+   * Must be a 32-byte (256-bit) value, supplied as either 64 hex chars or a
+   * base64 / base64url string. Generated with `openssl rand -hex 32`.
+   *
+   * Required since v0.2. The proxy refuses to start without it.
+   */
+  encryptionKey: string;
   devinApiBaseUrl: string;
   logLevel: string;
   isProduction: boolean;
@@ -31,6 +39,7 @@ export const config: Config = {
   port: parsePort(process.env["PORT"], 8080),
   databasePath: process.env["DATABASE_PATH"] ?? "./data/gateway.db",
   adminApiKey: process.env["ADMIN_API_KEY"] ?? "",
+  encryptionKey: process.env["ENCRYPTION_KEY"] ?? "",
   devinApiBaseUrl: stripTrailingSlash(
     process.env["DEVIN_API_BASE_URL"] ?? "https://api.devin.ai",
   ),

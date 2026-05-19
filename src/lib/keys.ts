@@ -1,5 +1,6 @@
 import { getDb } from "./db.js";
 import { generateProxyKey, hashKey } from "./crypto.js";
+import { encrypt, decrypt } from "./encryption.js";
 
 export interface ProxyKey {
   id: number;
@@ -33,7 +34,9 @@ function rowToKey(row: ProxyKeyRow): ProxyKey {
     name: row.name,
     keyHash: row.key_hash,
     keyPrefix: row.key_prefix,
-    upstreamToken: row.upstream_token,
+    // `upstream_token` is stored as an AES-256-GCM envelope (`enc:v1:...`);
+    // `decrypt()` transparently passes through legacy plaintext from v0.1.
+    upstreamToken: decrypt(row.upstream_token),
     upstreamBaseUrl: row.upstream_base_url,
     isActive: row.is_active === 1,
     createdAt: row.created_at,
@@ -74,7 +77,8 @@ export function createKey(input: CreateKeyInput): CreatedKey {
     name: input.name,
     keyHash,
     keyPrefix,
-    upstreamToken: input.upstreamToken,
+    // Always store the upstream Devin token encrypted at rest.
+    upstreamToken: encrypt(input.upstreamToken),
     upstreamBaseUrl: input.upstreamBaseUrl ?? null,
     notes: input.notes ?? null,
   });
