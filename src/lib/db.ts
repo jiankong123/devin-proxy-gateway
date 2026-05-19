@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { encrypt, isEncrypted } from "./encryption.js";
 
 let dbInstance: DatabaseType | null = null;
 
@@ -20,10 +21,44 @@ export function getDb(): DatabaseType {
   db.pragma("foreign_keys = ON");
 
   migrate(db);
+  migrateLegacyUpstreamTokens(db);
 
   dbInstance = db;
   logger.info({ path: config.databasePath }, "SQLite database ready");
   return db;
+}
+
+/**
+ * One-time migration: re-encrypt any `upstream_token` rows that were stored
+ * as plaintext under v0.1. Runs on every startup but is idempotent — once
+ * every row has the `enc:v1:` prefix the query finds nothing to do.
+ *
+ * We deliberately use a single `BEGIN` so a crash mid-migration leaves the
+ * table consistent (either every selected row is encrypted, or none is).
+ */
+function migrateLegacyUpstreamTokens(db: DatabaseType): void {
+  const rows = db
+    .prepare<[], { id: number; upstream_token: string }>(
+      "SELECT id, upstream_token FROM proxy_keys",
+    )
+    .all()
+    .filter((r) => !isEncrypted(r.upstream_token));
+
+  if (rows.length === 0) return;
+
+  const update = db.prepare(
+    "UPDATE proxy_keys SET upstream_token = ? WHERE id = ?",
+  );
+  const tx = db.transaction((batch: typeof rows) => {
+    for (const r of batch) {
+      update.run(encrypt(r.upstream_token), r.id);
+    }
+  });
+  tx(rows);
+  logger.warn(
+    { migrated: rows.length },
+    "Re-encrypted legacy plaintext upstream_token rows from v0.1",
+  );
 }
 
 function migrate(db: DatabaseType): void {

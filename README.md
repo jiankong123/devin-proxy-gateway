@@ -176,7 +176,7 @@ CREATE TABLE proxy_keys (
   name              TEXT NOT NULL,                 -- human-readable client name
   key_hash          TEXT NOT NULL UNIQUE,           -- sha256(plaintext)
   key_prefix        TEXT NOT NULL,                  -- first 16 chars for UI display
-  upstream_token    TEXT NOT NULL,                  -- real Devin token (Bearer ...)
+  upstream_token    TEXT NOT NULL,                  -- AES-256-GCM-encrypted Devin token, prefix `enc:v1:`
   upstream_base_url TEXT,                           -- nullable; overrides DEVIN_API_BASE_URL
   is_active         INTEGER NOT NULL DEFAULT 1,
   created_at        TEXT NOT NULL DEFAULT (datetime('now')),
@@ -202,10 +202,32 @@ CREATE TABLE api_usage_logs (
 ## Security notes
 
 - **Plaintext proxy keys are never persisted**. Only `sha256(key)` is stored; the prefix is kept only for display in the admin UI.
-- **Upstream tokens are stored in plaintext** in SQLite — secure the host filesystem accordingly. (Encryption-at-rest is a possible v0.2 feature.)
+- **Upstream Devin tokens are encrypted at rest** (AES-256-GCM) under a master `ENCRYPTION_KEY` that must be supplied via the environment. The proxy refuses to start without it. Storage envelope: `enc:v1:<iv>:<authTag>:<ciphertext>` (base64url). See [Upgrading from v0.1](#upgrading-from-v01) below.
 - `ADMIN_API_KEY` is compared with constant-time equality to mitigate timing oracle attacks.
+- `adminAuth` returns `401` for missing/invalid Bearer tokens (RFC 7235 compliant); `proxyAuth` returns `401` for missing tokens and `403` for unknown/disabled keys.
+- Every request, including authentication rejections, writes a row to `api_usage_logs` for audit purposes. Rejected requests use sentinel `client_key` values (`<missing>`, `<invalid>`) when the caller cannot be identified.
 - The proxy **never logs** request or response bodies — only metadata (method, path, status, latency, byte counts).
 - Hop-by-hop headers (`connection`, `keep-alive`, `transfer-encoding`, etc.) are stripped before forwarding upstream and before forwarding the response back.
+
+## Upgrading from v0.1
+
+v0.2 introduces mandatory at-rest encryption for upstream Devin tokens. To upgrade an existing database:
+
+1. Generate a 256-bit master key and persist it in your secret store:
+
+   ```bash
+   openssl rand -hex 32   # 64-char hex; also accepts base64
+   ```
+
+2. Export it before launching the new binary:
+
+   ```bash
+   export ENCRYPTION_KEY=<the value from step 1>
+   ```
+
+3. Start the proxy. On first boot against a v0.1 database, all existing rows whose `upstream_token` is still plaintext are re-encrypted in a single transaction and a `Re-encrypted legacy plaintext upstream_token rows from v0.1` line is written to the log. The migration is idempotent — subsequent restarts will not touch already-encrypted rows.
+
+4. **Treat `ENCRYPTION_KEY` like a database password**: losing it permanently locks every existing `upstream_token` row. If the key changes, the proxy will fail to start with `ENCRYPTION_KEY does not decrypt existing upstream_token rows` rather than silently 500-ing every request.
 
 ## Project layout
 
@@ -219,7 +241,8 @@ CREATE TABLE api_usage_logs (
 │   │   ├── logger.ts                 # pino logger
 │   │   ├── db.ts                     # better-sqlite3 connection + migrations
 │   │   ├── crypto.ts                 # key generation + sha256 + timing-safe compare
-│   │   ├── keys.ts                   # ProxyKey CRUD
+│   │   ├── keys.ts                   # ProxyKey CRUD (transparent encrypt/decrypt)
+│   │   ├── encryption.ts             # AES-256-GCM envelope helpers + key validation
 │   │   └── usage.ts                  # api_usage_logs insert
 │   ├── middlewares/
 │   │   ├── rawBody.ts                # capture raw req body for passthrough
@@ -248,7 +271,7 @@ This project is modelled after [`jiankong123/ai-proxy-gateway`](https://github.c
 | Key model          | Single shared upstream credentials (Replit Integrations)   | Per-key upstream Devin token (multi-tenant)           |
 | Storage            | PostgreSQL + Drizzle ORM                                  | SQLite + better-sqlite3                               |
 | Layout             | pnpm monorepo with separate dashboard package             | Single Node package                                   |
-| Dashboard          | React + Vite admin UI                                     | REST API + CLI only (UI planned for v0.2)             |
+| Dashboard          | React + Vite admin UI                                     | REST API + CLI only (UI planned for v0.3)             |
 
 ## License
 
