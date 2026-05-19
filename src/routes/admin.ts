@@ -15,6 +15,7 @@ import {
   setKeyActive,
   type ProxyKey,
 } from "../lib/keys.js";
+import { queryUsage } from "../lib/usage.js";
 
 const router: Router = Router();
 
@@ -125,6 +126,68 @@ router.patch("/keys/:id", (req: Request, res: Response) => {
   }
   const key = getKey(id);
   res.json({ key: key ? serialize(key) : null });
+});
+
+/**
+ * GET /admin/usage
+ *
+ * Paginated read over `api_usage_logs` so operators (and, in v0.3, the
+ * dashboard) can inspect recent traffic without going through `sqlite3`.
+ *
+ * Query parameters:
+ *   - `limit`       int   default 50, max 200
+ *   - `offset`      int   default 0
+ *   - `client_key`  str   exact match (use `<missing>` / `<invalid>` to
+ *                          inspect rejected-auth rows)
+ *   - `status`      int   exact match (e.g. 401, 403, 200)
+ *   - `since`       str   ISO timestamp lower bound on created_at
+ *   - `until`       str   ISO timestamp upper bound on created_at
+ *
+ * Response: `{ items, total, limit, offset }` where `total` is the count
+ * AFTER filters but BEFORE limit/offset, so the dashboard can paginate.
+ */
+router.get("/usage", (req: Request, res: Response) => {
+  const q = req.query;
+
+  const limitParsed = typeof q["limit"] === "string" ? Number(q["limit"]) : undefined;
+  const offsetParsed = typeof q["offset"] === "string" ? Number(q["offset"]) : undefined;
+  const statusParsed = typeof q["status"] === "string" ? Number(q["status"]) : undefined;
+
+  if (limitParsed !== undefined && !Number.isFinite(limitParsed)) {
+    res.status(400).json({
+      error: { message: "`limit` must be an integer.", type: "validation_error", code: 400 },
+    });
+    return;
+  }
+  if (offsetParsed !== undefined && !Number.isFinite(offsetParsed)) {
+    res.status(400).json({
+      error: { message: "`offset` must be an integer.", type: "validation_error", code: 400 },
+    });
+    return;
+  }
+  if (statusParsed !== undefined && !Number.isInteger(statusParsed)) {
+    res.status(400).json({
+      error: { message: "`status` must be an integer.", type: "validation_error", code: 400 },
+    });
+    return;
+  }
+
+  const page = queryUsage({
+    limit: limitParsed,
+    offset: offsetParsed,
+    clientKey: typeof q["client_key"] === "string" ? q["client_key"] : undefined,
+    status: statusParsed,
+    since: typeof q["since"] === "string" ? q["since"] : undefined,
+    until: typeof q["until"] === "string" ? q["until"] : undefined,
+  });
+
+  // Surface `is_stream` as a real boolean — the underlying column is 0/1.
+  res.json({
+    items: page.items.map((row) => ({ ...row, is_stream: row.is_stream === 1 })),
+    total: page.total,
+    limit: page.limit,
+    offset: page.offset,
+  });
 });
 
 router.delete("/keys/:id", (req: Request, res: Response) => {
