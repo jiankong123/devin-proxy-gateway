@@ -27,8 +27,8 @@ export function adminAuth(req: Request, res: Response, next: NextFunction): void
       : "";
 
   if (!token || !timingSafeEqual(token, config.adminApiKey)) {
-    res.status(403).json({
-      error: { message: "Invalid admin token.", type: "auth_error", code: 403 },
+    res.status(401).json({
+      error: { message: "Invalid admin token.", type: "auth_error", code: 401 },
     });
     return;
   }
