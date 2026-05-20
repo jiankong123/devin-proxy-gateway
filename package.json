@@ -9,9 +9,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "node ./build.mjs",
+    "build": "pnpm run build:server && pnpm run build:dashboard",
+    "build:server": "node ./build.mjs",
+    "build:dashboard": "cd dashboard && pnpm install --prefer-offline --no-frozen-lockfile && pnpm build",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "dev": "tsx watch src/index.ts",
+    "dev:dashboard": "cd dashboard && pnpm dev",
     "typecheck": "tsc --noEmit",
     "create-key": "tsx scripts/create-key.ts",
     "list-keys": "tsx scripts/list-keys.ts"
